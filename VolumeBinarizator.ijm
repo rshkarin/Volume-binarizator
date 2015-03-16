@@ -4,18 +4,21 @@
 macro "Binarize volume" {
 	requires("1.49h")
 	
-	var inputPath = "D:\\Roman\\XRegio\\Medaka";
-	var outputPath = "D:\\Roman\\XRegio\\Segmentations";
+	//var inputPath = "D:\\Roman\\XRegio\\Medaka";
+	//var outputPath = "D:\\Roman\\XRegio\\Segmentations";
+
+	var inputPath = "/Users/Roman/Documents/test_data";
+	var outputPath = "/Users/Roman/Documents/test_segmentations";
 	
-	var fishScale = "x2";
+	var fishScale = "x1";
 	var fishPrefix = "fish";
 	var fileExt = ".raw";
 	var filterSize = 5;
 	var sliceNoiseThreshold = 5; //in percentage
 	
 	//var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
-	var fishNumbers = newArray("200","202");
-	var medianFilteringFlag = false;
+	var fishNumbers = newArray("200");
+	var medianFilteringFlag = true;
 	
 	setBatchMode(true);
 	process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoiseThreshold, fishNumbers);
@@ -30,14 +33,14 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 	
 		for (j = 0; j < fileList.length; j++) {
 			fileName = fileList[j];
-			
+			print(fileName);
 			if (startsWith(fileName, fishPrefix + fishNumbers[i]) &&  endsWith(fileName, fileExt)) {
 				currentFileName = fileName;
 				break;
 			}
 		}
 
-		currentFileNameNoExt = replace(fileName, fileExt, "");
+		currentFileNameNoExt = replace(currentFileName, fileExt, "");
 		colorDepth = getVolumeColorDepth(currentFileNameNoExt);
 		volSize = getVolumeSizeFromFilename(currentFileNameNoExt, fileExt);
 		numBins = pow(2, colorDepth);
@@ -58,11 +61,12 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 		run("Duplicate...", "duplicate");
 		duplicatedStackId = getImageID();
 		selectImage(duplicatedStackId);
-		run("Auto Threshold", "method=Otsu ignore_black white stack");
+		run("Auto Threshold", "method=Otsu white stack");
 
 		//Detect eyes region
 		run("Invert", "stack");
 		run("Set Measurements...", "min shape area_fraction stack limit redirect=None decimal=3");
+		selectImage(duplicatedStackId);
 		run("Analyze Particles...", "size=2500-Infinity circularity=0.8-1.00 show=Nothing exclude clear stack");
 		eyesRange = getSliceRangeOfEyes();
 		selectImage(duplicatedStackId);
@@ -85,8 +89,13 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
  			setSlice(sliceIdx);
 
  			//Threshold eyes with special method
- 			if (checkInRange(sliceIdx - 1, eyesRange)) {
- 				run("Auto Threshold", "method=Li white");
+ 			if (eyesRange.length) {
+ 				if (checkInRange(sliceIdx - 1, eyesRange)) {
+ 					run("Auto Threshold", "method=Li white");
+ 				}
+ 				else {
+ 					run("Auto Threshold", "method=Otsu white");
+ 				}
  			}
  			else {
  				run("Auto Threshold", "method=Otsu white");
@@ -171,9 +180,6 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 		//Save as tiff stack
 		saveDataAsTiffStack(outputPath, fishPrefix, fishNumbers[i], volSize, colorDepth, fishPrefix);
 
-		//Close
-		//selectImage(reslicedStackTop2Id);
-		//close();
 		close("*");
 	}
 	close("*");
@@ -206,12 +212,14 @@ function saveDataAsTiffStack(outputPath, fishPrefix, fishNumber, volSize, colorD
 }
 
 function getSliceRangeOfEyes() {
+	if (!nResults) {
+		return newArray();
+	}
+	
 	allIndicies = newArray();
 	actualIndicies = newArray();
 	step = 25;
-	
 	epsilon = 10;
-	
 	for (i = 0; i < nResults; i++) {
 		allIndicies = Array.concat(allIndicies, parseInt(getResult("Slice", i)));
 	}
