@@ -4,11 +4,11 @@
 macro "Binarize volume" {
 	requires("1.49h")
 	
-	//var inputPath = "D:\\Roman\\XRegio\\Medaka";
-	//var outputPath = "D:\\Roman\\XRegio\\Segmentations";
+	var inputPath = "D:\\Roman\\XRegio\\Medaka";
+	var outputPath = "D:\\Roman\\XRegio\\Segmentations";
 
-	var inputPath = "/Users/Roman/Documents/test_data";
-	var outputPath = "/Users/Roman/Documents/test_segmentations";
+	//var inputPath = "/Users/Roman/Documents/test_data";
+	//var outputPath = "/Users/Roman/Documents/test_segmentations";
 	
 	var fishScale = "x1";
 	var fishPrefix = "fish";
@@ -16,8 +16,9 @@ macro "Binarize volume" {
 	var filterSize = 5;
 	var sliceNoiseThreshold = 5; //in percentage
 	
-	//var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
-	var fishNumbers = newArray("200");
+	var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
+	//var fishNumbers = newArray("202");
+	
 	var medianFilteringFlag = true;
 	
 	setBatchMode(true);
@@ -40,10 +41,14 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			}
 		}
 
+		print("currentPath=" + currentPath);
+
 		currentFileNameNoExt = replace(currentFileName, fileExt, "");
 		colorDepth = getVolumeColorDepth(currentFileNameNoExt);
 		volSize = getVolumeSizeFromFilename(currentFileNameNoExt, fileExt);
 		numBins = pow(2, colorDepth);
+
+		print(currentPath + File.separator + currentFileName);
 
 		//Open data as stack
 		run("Raw...", 
@@ -56,28 +61,8 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			" gap=0 little-endian");
 			
 		stackId = getImageID();
-			
-		//Prethreshold with Otsu
-		run("Duplicate...", "duplicate");
-		duplicatedStackId = getImageID();
-		selectImage(duplicatedStackId);
-		run("Auto Threshold", "method=Otsu white stack");
-
-		//Detect eyes region
-		run("Invert", "stack");
-		run("Set Measurements...", "min shape area_fraction stack limit redirect=None decimal=3");
-		selectImage(duplicatedStackId);
-		run("Analyze Particles...", "size=2500-Infinity circularity=0.8-1.00 show=Nothing exclude clear stack");
-		eyesRange = getSliceRangeOfEyes();
-		selectImage(duplicatedStackId);
-		close();
 		
-		Array.print(eyesRange);
-
-		//Create new stack
-		sliceOffset = floor(volSize[2]*0.05);
-		
-		newImage("segmented_" + currentFileNameNoExt, toString(colorDepth) + "-bit grayscale-mode", volSize[0], volSize[1], 1, volSize[2] + sliceOffset*2, 1);
+		newImage("segmented_" + currentFileNameNoExt, toString(colorDepth) + "-bit grayscale-mode", volSize[0], volSize[1], 1, volSize[2], 1);
 		newStackId = getImageID();
 		
 		for (sliceIdx = 1; sliceIdx <= volSize[2]; sliceIdx++) {
@@ -88,19 +73,6 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			selectImage(stackId);
  			setSlice(sliceIdx);
 
- 			//Threshold eyes with special method
- 			if (eyesRange.length) {
- 				if (checkInRange(sliceIdx - 1, eyesRange)) {
- 					run("Auto Threshold", "method=Li white");
- 				}
- 				else {
- 					run("Auto Threshold", "method=Otsu white");
- 				}
- 			}
- 			else {
- 				run("Auto Threshold", "method=Otsu white");
- 			}
-			
  			//Duplicate to check the noise level
 			run("Duplicate...", "title=test_duplicated_" + currentFileNameNoExt);
  			testDuplicatedSliceId = getImageID();
@@ -130,48 +102,21 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			" height=" + toString(volSize[1] + floor(volSize[1] * 0.1)) +
 			" position=Center zero");
 			
- 			run("Options...", "iterations=4 count=1 black pad edm=Overwrite do=Close");
+			run("Variance...", "radius=2");
+			run("Non-local Means Denoising", "sigma=40");
+			run("Auto Threshold", "method=Otsu white");
 			run("Fill Holes");
 			
  			//Copy to new stack
 			run("Select All");
 			run("Copy");
 			selectImage(newStackId);
-			setSlice(sliceIdx + sliceOffset);
+			setSlice(sliceIdx);
 			run("Paste");
-
-			selectImage(duplicatedSliceId);
-			close();
 		}
 		
 		selectImage(newStackId);
 
-		//Update sizes
-		volSize[0] = getWidth();
-		volSize[1] = getHeight();
-		volSize[2] = nSlices;
-
-		run("Reslice [/]...", "output=1.000 start=Top avoid");
-		reslicedStackTopId = getImageID();
-		selectImage(reslicedStackTopId);
-		run("Options...", "iterations=2 count=1 black pad edm=Overwrite do=Close stack");
-		run("Fill Holes", "stack");
-		
-		run("Reslice [/]...", "output=1.000 start=Right rotate avoid");
-		reslicedStackRightId = getImageID();
-		selectImage(reslicedStackTopId);
-		close();
-		selectImage(reslicedStackRightId);
-		run("Options...", "iterations=2 count=1 black pad edm=Overwrite do=Close stack");
-		run("Fill Holes", "stack");
-		
-		run("Reslice [/]...", "output=1.000 start=Top rotate avoid");
-		reslicedStackTop2Id = getImageID();
-		selectImage(reslicedStackRightId);
-		close();
-		selectImage(reslicedStackTop2Id);
-		run("Flip Horizontally", "stack");
-		
 		//Filter with 3D Median
 		if (medianFilteringFlag) {
 			run("Median 3D...", "x=" + toString(filterSize) + " y=" + toString(filterSize) + " z=" + toString(filterSize));
