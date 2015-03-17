@@ -16,10 +16,10 @@ macro "Binarize volume" {
 	var filterSize = 5;
 	var sliceNoiseThreshold = 5; //in percentage
 	
-	var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
-	//var fishNumbers = newArray("202");
+	//var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
+	var fishNumbers = newArray("200");
 	
-	var medianFilteringFlag = true;
+	var medianFilteringFlag = false;
 	
 	setBatchMode(true);
 	process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoiseThreshold, fishNumbers);
@@ -61,13 +61,18 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			" gap=0 little-endian");
 			
 		stackId = getImageID();
+
+		step=1;
 		
 		newImage("segmented_" + currentFileNameNoExt, toString(colorDepth) + "-bit grayscale-mode", volSize[0], volSize[1], 1, volSize[2], 1);
 		newStackId = getImageID();
 		
-		for (sliceIdx = 1; sliceIdx <= volSize[2]; sliceIdx++) {
+		for (sliceIdx = 1; sliceIdx <= volSize[2]; sliceIdx+=step) {
+		//for (sliceIdx = 2800; sliceIdx <= 2900; sliceIdx+=step) {
+
  			//Update progress
- 			showProgress((sliceIdx - 1) / volSize[2]);
+ 			showProgress(sliceIdx / volSize[2]);
+ 			showText("Volume: " + fishPrefix + fishNumbers[i] + " | Slice " +  toString(sliceIdx) + "/" + toString(volSize[2]) + " is being processed");
 
 			//Process original data
 			selectImage(stackId);
@@ -79,7 +84,8 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			selectImage(testDuplicatedSliceId);
 			
 			//Increase noise if presented
-			run("Options...", "iterations=4 count=1 black pad edm=Overwrite do=Dilate");
+			run("Auto Threshold", "method=Otsu white");
+			run("Options...", "iterations=4 count=1 black edm=Overwrite do=Dilate");
 			getHistogram(values, binCounts, numBins);
 			selectImage(testDuplicatedSliceId);
 			close();
@@ -88,31 +94,96 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 				continue;
 			}
 
-			showText("Volume: " + fishPrefix + fishNumbers[i] + " | Slice " +  toString(sliceIdx) + "/" + toString(volSize[2]) + " is being processed");
-
 			//Duplicate and process 
 			selectImage(stackId);
 			setSlice(sliceIdx);
- 			run("Duplicate...", "title=duplicated_" + currentFileNameNoExt);
- 			duplicatedSliceId = getImageID();
- 			
+			
+ 			run("Duplicate...", "title=duplicated_1" + currentFileNameNoExt);
+ 			duplicatedSliceId1 = getImageID();
+ 			duplicatedSliceId1Name = getTitle();
+
+ 			run("Duplicate...", "title=duplicated_2" + currentFileNameNoExt);
+ 			duplicatedSliceId2 = getImageID();
+			duplicatedSliceId2Name = getTitle();
+
+			print(duplicatedSliceId1Name);
+			print(duplicatedSliceId2Name);
+
  			//Add space on corners
+ 			/*
 			run("Canvas Size...",
 			"width=" + toString(volSize[0] + floor(volSize[0] * 0.1)) +
 			" height=" + toString(volSize[1] + floor(volSize[1] * 0.1)) +
 			" position=Center zero");
+			*/
 			
+			
+			/*
 			run("Variance...", "radius=2");
 			run("Non-local Means Denoising", "sigma=40");
 			run("Auto Threshold", "method=Otsu white");
 			run("Fill Holes");
+			*/
+			//Mask creating
+
+			//Extraction sequence
+			//run("Gaussian Blur...", "sigma=2");
+			
+			//run("Unsharp Mask...", "radius=1 mask=0.60");
+			//run("Median...", "radius=2");
+			//run("Variance...", "radius=1");
+			//run("FeatureJ Edges", "compute smoothing=1 lower=[] higher=[]");
+			//run("8-bit");
+			//run("Variance...", "radius=1");   //204
+			//run("Non-local Means Denoising", "sigma=30");
+			//run("Variance...", "radius=2");   //204\
+			//run("Variance...", "radius=1");   //204
+			//run("Non-local Means Denoising", "sigma=50");
+			//run("Variance...", "radius=1");   //202
+			
+			//run("Variance...", "radius=1");
+			//run("Unsharp Mask...", "radius=1 mask=0.60");
+			//run("Auto Threshold", "method=Otsu white");
+			//run("Options...", "iterations=2 count=1 black edm=Overwrite do=Close");
+			//run("Fill Holes");
+			//run("Median...", "radius=5");
+			//run("Options...", "iterations=2 count=1 black edm=Overwrite do=Erode");
+			//run("Median...", "radius=5");
+
+			//Second cosn
+			selectImage(duplicatedSliceId1);
+			run("Gaussian Blur...", "sigma=1");
+			run("Variance...", "radius=3");
+			run("Auto Threshold", "method=Li white");
+			run("Options...", "iterations=6 count=1 black edm=Overwrite do=Close");
+			run("Fill Holes");
+			run("Median...", "radius=5");
+
+			selectImage(duplicatedSliceId2);
+			run("Auto Threshold", "method=Otsu white");
+			run("Variance...", "radius=1");
+			run("Options...", "iterations=5 count=1 black edm=Overwrite do=Close");
+			run("Fill Holes");
+			run("Median...", "radius=5");
+
+			imageCalculator("OR", duplicatedSliceId1, duplicatedSliceId2);
+			selectImage(duplicatedSliceId1);
+		
+			run("Median...", "radius=3");
+			run("8-bit");
 			
  			//Copy to new stack
 			run("Select All");
 			run("Copy");
 			selectImage(newStackId);
 			setSlice(sliceIdx);
+
 			run("Paste");
+
+			selectImage(duplicatedSliceId2);
+			close();
+			selectImage(duplicatedSliceId1);
+			close();
 		}
 		
 		selectImage(newStackId);
