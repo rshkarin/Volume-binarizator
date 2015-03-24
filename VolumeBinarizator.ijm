@@ -6,6 +6,8 @@ macro "Binarize volume" {
 	
 	var inputPath = "D:\\Roman\\XRegio\\Medaka";
 	var outputPath = "D:\\Roman\\XRegio\\Segmentations";
+	var outputMedianPath = "D:\\Roman\\XRegio\\Segmentations_Median";
+
 
 	//var inputPath = "/Users/Roman/Documents/test_data";
 	//var outputPath = "/Users/Roman/Documents/test_segmentations";
@@ -13,16 +15,27 @@ macro "Binarize volume" {
 	var fishScale = "x1";
 	var fishPrefix = "fish";
 	var fileExt = ".raw";
+	var segmentedFishFileExt = ".tif";
+	var method_name = "segmented";
 	var filterSize = 5;
-	var sliceNoiseThreshold = 5; //in percentage
+	var sliceNoiseThreshold = 2; //in percentage
+	var sliceLocalNoiseThreshold = 5; //in percentage
+
 	
 	//var fishNumbers = newArray("200","202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
 	var fishNumbers = newArray("200");
+	//var fishNumbers = newArray("200", "202","204","214","215","221","223","224","226","228","230","231","233","235","236","237","238","239","243","244","245","A15");
 	
-	var medianFilteringFlag = false;
+	var medianFilteringFlag = true;
 	
 	setBatchMode(true);
+	
 	process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoiseThreshold, fishNumbers);
+	
+	if (medianFilteringFlag) {
+		medianFiltering(outputPath, outputMedianPath, method_name, fishPrefix, segmentedFishFileExt, fishNumbers);
+	}
+	
 	setBatchMode(false);
 }
 
@@ -34,21 +47,19 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 	
 		for (j = 0; j < fileList.length; j++) {
 			fileName = fileList[j];
-			print(fileName);
+
 			if (startsWith(fileName, fishPrefix + fishNumbers[i]) &&  endsWith(fileName, fileExt)) {
 				currentFileName = fileName;
 				break;
 			}
 		}
 
-		print("currentPath=" + currentPath);
+      	printLogMessage("Binarizing started", currentPath + File.separator + currentFileName);
 
 		currentFileNameNoExt = replace(currentFileName, fileExt, "");
 		colorDepth = getVolumeColorDepth(currentFileNameNoExt);
 		volSize = getVolumeSizeFromFilename(currentFileNameNoExt, fileExt);
 		numBins = pow(2, colorDepth);
-
-		print(currentPath + File.separator + currentFileName);
 
 		//Open data as stack
 		run("Raw...", 
@@ -68,7 +79,7 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 		newStackId = getImageID();
 		
 		for (sliceIdx = 1; sliceIdx <= volSize[2]; sliceIdx+=step) {
-		//for (sliceIdx = 2800; sliceIdx <= 2900; sliceIdx+=step) {
+		//for (sliceIdx = 2800; sliceIdx <= 2850; sliceIdx+=step) {
 
  			//Update progress
  			showProgress(sliceIdx / volSize[2]);
@@ -85,11 +96,11 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			
 			//Increase noise if presented
 			run("Auto Threshold", "method=Otsu white");
-			run("Options...", "iterations=4 count=1 black edm=Overwrite do=Dilate");
-			getHistogram(values, binCounts, numBins);
+			run("Options...", "iterations=10 count=1 black edm=Overwrite do=Dilate");
 			selectImage(testDuplicatedSliceId);
+			getHistogram(values, binCounts, numBins);
 			close();
-			
+
 			if ((binCounts[values[0]] < binCounts[values[numBins - 1]]) && checkInBeginningOrEnd(sliceIdx, volSize[2], sliceNoiseThreshold)) {
 				continue;
 			}
@@ -98,16 +109,14 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			selectImage(stackId);
 			setSlice(sliceIdx);
 			
+ 			//run("Duplicate...", "duplicate range=" + toString(sliceIdx - nearestSlices) + "-" + toString(sliceIdx + nearestSlices) + " title=duplicated_1" + currentFileNameNoExt);
  			run("Duplicate...", "title=duplicated_1" + currentFileNameNoExt);
  			duplicatedSliceId1 = getImageID();
- 			duplicatedSliceId1Name = getTitle();
 
+ 			selectImage(stackId);
+ 			//run("Duplicate...", "duplicate range=" + toString(sliceIdx - nearestSlices) + "-" + toString(sliceIdx + nearestSlices) + " title=duplicated_2" + currentFileNameNoExt);
  			run("Duplicate...", "title=duplicated_2" + currentFileNameNoExt);
  			duplicatedSliceId2 = getImageID();
-			duplicatedSliceId2Name = getTitle();
-
-			print(duplicatedSliceId1Name);
-			print(duplicatedSliceId2Name);
 
  			//Add space on corners
  			/*
@@ -151,6 +160,7 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			//run("Median...", "radius=5");
 
 			//Second cosn
+			/*
 			selectImage(duplicatedSliceId1);
 			run("Gaussian Blur...", "sigma=1");
 			run("Variance...", "radius=3");
@@ -171,6 +181,63 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 		
 			run("Median...", "radius=3");
 			run("8-bit");
+			*/
+
+			//New way#1
+			selectImage(duplicatedSliceId1);
+			run("Auto Threshold", "method=Otsu white");
+
+			selectImage(duplicatedSliceId2);
+			run("Gaussian Blur...", "sigma=1");
+			//run("Variance...", "radius=1");
+			run("Find Edges");
+			run("Auto Threshold", "method=Otsu white");
+
+			//One more check
+			run("Duplicate...", "title=duplicated_local_noise_" + currentFileNameNoExt);
+ 			duplicatedLocalNoiseSliceId = getImageID();
+			run("Options...", "iterations=6 count=1 black edm=Overwrite do=Close");
+			run("Fill Holes");
+			getHistogram(values, binCounts, numBins);
+			close();
+			
+			if ((binCounts[values[0]] < binCounts[values[numBins - 1]]) && checkInBeginningOrEnd(sliceIdx, volSize[2], sliceLocalNoiseThreshold)) {
+				selectImage(duplicatedSliceId1);
+			}
+			else {
+				imageCalculator("Add", duplicatedSliceId1, duplicatedSliceId2);
+				selectImage(duplicatedSliceId1);
+			}
+			
+			run("Options...", "iterations=6 count=1 black edm=Overwrite do=Close");
+			run("Fill Holes");
+			run("Median...", "radius=3");
+			//run("Options...", "iterations=3 count=1 black edm=Overwrite do=Erode");
+
+			//Way #2 (too slow)
+			/*
+			selectImage(duplicatedSliceId1);
+			run("Auto Threshold", "method=Otsu white stack");
+
+			selectImage(duplicatedSliceId2);
+			run("Gaussian Blur...", "sigma=1 stack");
+			run("Variance...", "radius=1 stack");
+			run("Auto Threshold", "method=Otsu white stack");
+
+			imageCalculator("Add stack", duplicatedSliceId1, duplicatedSliceId2);
+			selectImage(duplicatedSliceId1);
+			
+			run("Options...", "iterations=5 count=1 black edm=Overwrite do=Close stack");
+			run("Fill Holes", "stack");
+			run("Median 3D...", "x=3 y=3 z=3");
+			run("Options...", "iterations=1 count=1 black edm=Overwrite do=Erode stack");
+			
+			run("Z Project...", "projection=[Average Intensity]");
+			averagedSliceId = getImageID();
+			
+			run("Auto Threshold", "method=Otsu white");
+			run("Fill Holes");
+			*/
 			
  			//Copy to new stack
 			run("Select All");
@@ -184,22 +251,63 @@ function process(inputPath, outputPath, fishScale, fishPrefix, fileExt, sliceNoi
 			close();
 			selectImage(duplicatedSliceId1);
 			close();
+			//selectImage(averagedSliceId);
+			//close();
 		}
 		
 		selectImage(newStackId);
-
-		//Filter with 3D Median
-		if (medianFilteringFlag) {
-			run("Median 3D...", "x=" + toString(filterSize) + " y=" + toString(filterSize) + " z=" + toString(filterSize));
-		}
 		
 		//Save as tiff stack
-		saveDataAsTiffStack(outputPath, fishPrefix, fishNumbers[i], volSize, colorDepth, fishPrefix);
-
+		saveDataAsTiffStack(outputPath, "segmented", fishPrefix, fishNumbers[i], volSize, colorDepth);
+		
+		printLogMessage("Binarizing finished", currentPath + File.separator + currentFileName);
+	
 		close("*");
 	}
 	close("*");
 }
+
+function medianFiltering(inputPath, outputPath, method_name, fishPrefix, segmentedFishFileExt, fishNumbers) {
+	for (i = 0; i < fishNumbers.length; i++) {
+		currentPath = inputPath + File.separator + fishPrefix + fishNumbers[i];
+		fileList = getFileList(currentPath);
+		currentFileName = "";
+	
+		for (j = 0; j < fileList.length; j++) {
+			fileName = fileList[j];
+
+			if (startsWith(fileName, method_name + "_" + fishPrefix + fishNumbers[i]) &&  endsWith(fileName, segmentedFishFileExt)) {
+				currentFileName = fileName;
+				break;
+			}
+		}
+
+		//Open data as a tiff stack
+		open(currentPath + File.separator + currentFileName);
+		segmentedStackId = getImageID();
+
+		//Get stack info
+		stackWidth = getWidth();
+		stackHeight = getHeight();
+		stackSlices = nSlices;
+		volSize = newArray(stackWidth, stackHeight, stackSlices);
+		colorDepth = bitDepth();
+
+		printLogMessage("Median filtering started", currentPath + File.separator + currentFileName);
+
+		//Filter with 3D Median
+		run("Median 3D...", "x=" + toString(filterSize) + " y=" + toString(filterSize) + " z=" + toString(filterSize));
+
+		printLogMessage("Median filtering finished", currentPath + File.separator + currentFileName);
+		
+		//Save as tiff stack
+		saveDataAsTiffStack(outputPath, method_name + "_median", fishPrefix, fishNumbers[i], volSize, colorDepth);
+		
+		close("*");
+	}
+	close("*");
+}
+
 
 function getVolumeSizeFromFilename(fileName, fileExt) {
 	tmp = split(fileName, "_");
@@ -216,14 +324,14 @@ function getVolumeColorDepth(fileName) {
 	return parseInt(colorDepth);
 }
 
-function saveDataAsTiffStack(outputPath, fishPrefix, fishNumber, volSize, colorDepth, fishPrefix) {
+function saveDataAsTiffStack(outputPath, method_name, fishPrefix, fishNumber, volSize, colorDepth) {
 	savePath = outputPath + File.separator + fishPrefix + fishNumber;
 	
 	if (!File.exists(savePath)) {
 		File.makeDirectory(savePath);
 	} 
 
-	saveAs("Tiff", savePath + File.separator + "segmented_" + fishPrefix + fishNumber + "_" + 
+	saveAs("Tiff", savePath + File.separator + method_name + "_" + fishPrefix + fishNumber + "_" + 
 				   toString(colorDepth) + "bit_" + toString(volSize[0]) + "x" + toString(volSize[1]) + "x" + toString(volSize[2]) + ".tif");
 }
 
@@ -289,4 +397,9 @@ function checkInBeginningOrEnd(index, sliceNum, sliceThreshold) {
 	else {
 		return false;
 	}
+}
+
+function printLogMessage(title, message) {
+	getDateAndTime(year, month, week, day, hour, min, sec, msec);
+    print(hour+":"+min+":"+sec+" -- " + title + ": ", message);	
 }
